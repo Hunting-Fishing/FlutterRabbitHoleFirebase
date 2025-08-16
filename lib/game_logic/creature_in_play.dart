@@ -1,16 +1,11 @@
 // lib/game_logic/creature_in_play.dart
 import 'package:myapp/game_data/card_definition.dart';
 
-/// A creature instance on the battlefield, created from a CardDefinition.
-/// Tracks mutable battle stats (attack/toughness), tapping, and summoning sickness.
+/// A creature instance on the battlefield.
 class CreatureInPlay {
   final CardDefinition cardDefinition;
-
-  /// Mutable in-battle stats (start from base card stats and can change)
   int currentAttack;
   int currentToughness;
-
-  /// State flags
   bool hasSummoningSickness;
   bool isTapped;
 

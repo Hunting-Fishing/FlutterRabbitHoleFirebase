@@ -1,7 +1,6 @@
 // lib/game_data/card_definition.dart
 
-/// Abilities your cards can have.
-/// Make sure every ability used in the manager exists here.
+/// Abilities cards can have.
 enum CardAbilityType {
   attackBoost,
   defenseBoost,
@@ -13,20 +12,32 @@ enum CardAbilityType {
   dealDamageX,
 }
 
-/// Core, immutable definition of a card.
-/// Use this for hand/deck/graveyard data (not for creatures in play).
+enum CardRarity { common, rare, epic, legendary }
+enum CardFaction { underground, media, gov }
+
+/// Immutable definition of a card (for deck/hand/graveyard).
 class CardDefinition {
-  final String id;          // unique-ish identifier
-  final String name;        // display name
-  final String typeId;      // e.g. 'creature', 'spell'
-  final int cost;           // resource cost to play
+  // Identity
+  final String id;
+  final String name;
 
-  /// For creatures only (null for non-creature card types)
-  final int? attack;
-  final int? defense;
-
-  /// Keyword/active abilities this card provides when cast/played
+  // Gameplay
+  final String typeId; // 'creature' or 'spell'
+  final int cost;
+  final int? attack;   // creatures only
+  final int? defense;  // creatures only
   final List<CardAbilityType> abilities;
+
+  // Metadata
+  final String description;
+  final String categoryId;
+  final String classId;
+  final CardRarity rarity;
+  final CardFaction faction;
+  final List<String> tags;
+
+  // Artwork (asset path or URL)
+  final String imagePath;
 
   const CardDefinition({
     required this.id,
@@ -36,7 +47,19 @@ class CardDefinition {
     this.attack,
     this.defense,
     this.abilities = const [],
+    this.description = '',
+    this.categoryId = '',
+    this.classId = '',
+    this.rarity = CardRarity.common,
+    this.faction = CardFaction.gov,
+    this.tags = const [],
+    this.imagePath = '',
   });
 
   bool get isCreature => typeId.toLowerCase() == 'creature';
+
+  /// Back-compat for any old UI that used `artworkUrl`.
+  String get artworkUrl => imagePath;
+
+  bool get hasImage => imagePath.isNotEmpty;
 }

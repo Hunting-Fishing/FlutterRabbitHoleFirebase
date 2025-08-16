@@ -1,20 +1,25 @@
-import '../game_data/card_definition.dart';
+// lib/game_logic/creature_in_play.dart
+import 'package:myapp/game_data/card_definition.dart';
 
+/// A creature instance on the battlefield, created from a CardDefinition.
+/// Tracks mutable battle stats (attack/toughness), tapping, and summoning sickness.
 class CreatureInPlay {
   final CardDefinition cardDefinition;
+
+  /// Mutable in-battle stats (start from base card stats and can change)
+  int currentAttack;
   int currentToughness;
-  int currentAttack; // Added currentAttack property
-  int damageTaken = 0;
+
+  /// State flags
+  bool hasSummoningSickness;
   bool isTapped;
-  bool hasSummoningSickness; // Added hasSummoningSickness property
 
   CreatureInPlay({
     required this.cardDefinition,
-    this.isTapped = false, // Creatures typically enter the battlefield untapped
-    this.hasSummoningSickness = true,
-  }) : currentToughness = cardDefinition.defense ?? 0,
-       currentAttack = cardDefinition.attack ?? 0;
-
-  // Helper to get the effective toughness considering damage taken
-  int get effectiveToughness => (cardDefinition.defense ?? 0) - damageTaken;
+    bool hasSummoningSickness = true,
+    bool isTapped = false,
+  })  : hasSummoningSickness = hasSummoningSickness,
+        isTapped = isTapped,
+        currentAttack = cardDefinition.attack ?? 0,
+        currentToughness = cardDefinition.defense ?? 0;
 }

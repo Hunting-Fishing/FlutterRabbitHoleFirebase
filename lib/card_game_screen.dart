@@ -27,7 +27,6 @@ class CardGameScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Placeholder data for demonstration
     final List<CardDefinition> playerHand = List.generate(
       5,
       (index) => CardDefinition(
@@ -37,33 +36,27 @@ class CardGameScreen extends StatelessWidget {
         // TODO: Replace with actual values based on your game data
         typeId: index % 2 == 0 ? 'creature' : 'spell',
         categoryId: 'conspiracy', // Using a single category for placeholders
-        classId: index % 3 == 0 ? 'illuminati' : index % 3 == 1 ? 'shadow' : 'neutral', // Varied classes
-        attack: index % 2 == 0 ? index + 1 : null, // Attack only for creatures
-        defense: index % 2 == 0 ? index + 2 : null, // Defense only for creatures
-        cost: index + 1, // Varied costs
-        abilities: [], // Placeholder
-        rarity: index % 4 == 0 ? CardRarity.legendary : index % 3 == 0 ? CardRarity.epic : index % 2 == 0 ? CardRarity.rare : CardRarity.common, // Varied rarities
-        faction: index % 5 == 0 ? CardFaction.gov : index % 5 == 1 ? CardFaction.media : index % 5 == 2 ? CardFaction.megacorp : index % 5 == 3 ? CardFaction.cult : CardFaction.underground, // Varied factions
+        classId: 'placeholder',
+        attack: 1,
+        defense: 1,
+        cost: 1,
+        abilities: [],
+        rarity: CardRarity.common,
+        faction: CardFaction.underground, // Changed from neutral to a valid faction
         tags: ['placeholder'], // Placeholder tags
-
       ),
     );
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Conspiracy Card Game'),
       ),
       body: Column(
         children: [
-          Expanded(
-            flex: 2,
-            child: GameBoardWidget(),
- ),
+ Expanded(
             child: GameBoardWidget(),
           ),
           PlayerHandWidget(
-            cards: playerHand.map((cardDef) => CardWidget(
- card: cardDef, // Use onTapCard instead of onTap
+            cards: playerHand.map((cardDef) => CardWidget(card: cardDef,
  onTapCard: (tappedObject) {
                 // TODO: Implement card tap logic
                },)).toList()),

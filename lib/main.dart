@@ -4,16 +4,14 @@ import 'package:provider/provider.dart';
 
 import 'package:myapp/game_logic/card_game_state_manager.dart';
 import 'package:myapp/game_logic/deck_manager.dart';
-import 'package:myapp/game_logic/deck_manager.dart'; // Import DeckManager
 import 'package:myapp/deck_builder_screen.dart';
-import 'package:myapp/simulation_game_screen.dart'; // If you already have this, keep it. If not, use the stub provided below.
+import 'package:myapp/simulation_game_screen.dart';
 
 void main() {
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  // MyApp is already StatelessWidget, which is immutable if all fields are final.
   const MyApp({super.key});
 
   @override
@@ -26,13 +24,17 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider<DeckManager>(
           create: (_) {
             final deckManager = DeckManager();
-            deckManager.addSampleCards(); // Assuming addSampleCards exists and is needed for initial setup
+            // Only call this if it exists and is idempotent
+            deckManager.addSampleCards();
             return deckManager;
-          }),
+          },
+        ),
       ],
       child: MaterialApp(
         title: 'Conspiracy Mobile Game',
-        theme: ThemeData(
+        theme: ThemeData(useMaterial3: true),
+        home: const MyHomePage(title: 'Rabbit Hole'),
+        debugShowCheckedModeBanner: false,
       ),
     );
   }
@@ -51,28 +53,23 @@ class _MyHomePageState extends State<MyHomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
       ),
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Background Image (ensure it's listed in pubspec.yaml assets)
-          Image.asset(
-            'assets/images/Dashboard.png',
-            fit: BoxFit.cover,
-          ),
+          // Background image. Ensure the file exists.
+          Image.asset('assets/images/Dashboard.png', fit: BoxFit.cover),
 
-          // Foreground content
           SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.psychology, size: 30.0),
+                    const Icon(Icons.psychology, size: 30),
                     const SizedBox(width: 8),
                     Text(
                       'Conspiracy Fragments: 0',
@@ -80,38 +77,27 @@ class _MyHomePageState extends State<MyHomePage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 24.0),
+                const SizedBox(height: 24),
 
-                // Simulation Game button
                 ElevatedButton(
                   onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const SimulationGameScreen(),
-                      ),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SimulationGameScreen()),
                     );
                   },
                   child: const Text('Simulation Game'),
                 ),
 
-                const SizedBox(height: 24.0),
-                Text(
-                  'Coming Soon:',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12.0),
+                const SizedBox(height: 24),
+                Text('Coming Soon:', style: Theme.of(context).textTheme.headlineSmall),
+                const SizedBox(height: 12),
                 const Text('Game Mode 2'),
                 const Text('Game Mode 3'),
 
-                const SizedBox(height: 24.0),
-
-                // Deck Builder Button
+                const SizedBox(height: 24),
                 ElevatedButton(
                   onPressed: () {
-                    Navigator.push(
-                      context,
+                    Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const DeckBuilderScreen()),
                     );
                   },

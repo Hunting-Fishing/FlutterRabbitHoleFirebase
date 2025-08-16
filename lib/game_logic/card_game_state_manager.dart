@@ -1,3 +1,4 @@
+// lib/game_logic/card_game_state_manager.dart
 import 'dart:math';
 import 'dart:developer' as developer;
 import 'package:flutter/foundation.dart';
@@ -7,14 +8,32 @@ import 'package:myapp/game_data/game_data_manager.dart';
 import 'package:myapp/game_logic/creature_in_play.dart';
 import 'package:myapp/game_logic/player.dart';
 
-/// Phases used by the UI
+/// High-level turn phases for the UI and rules engine
 enum TurnPhase { start, main1, combat, main2, end }
 
+/// Tunables (easy to tweak for balance/playtests)
+class GameRules {
+  static const int startingLife = 20;
+  static const int startingResources = 0;
+  static const int startingHandSize = 5;
+  static const int handLimit = 7;
+  static const bool tapAttackersOnDeclare = true;
+  static const int resourceGainPerTurnStart = 1;
+  static const bool summoningSicknessAffectsAttack = true;
+}
+
+/// Core state manager for the TCG-lite loop
 class CardGameStateManager extends ChangeNotifier {
+  // ----------------------------------------------------------------------------
+  // Public state
+  // ----------------------------------------------------------------------------
   bool isGameEnded = false;
   String? winningPlayerId;
 
-  final List<CardDefinition> discardPile = []; // Shared discard pile? Or per-player?
+  /// Shared discard pile:
+  /// Keep this if you want a visible "global discard" for spells/creatures.
+  /// (Creatures in play die => their `cardDefinition` is added here.)
+  final List<CardDefinition> discardPile = [];
 
   /// Two players
   List<Player> players = [];
@@ -30,13 +49,14 @@ class CardGameStateManager extends ChangeNotifier {
   }
 
   Player get currentPlayer => players[currentPlayerIndex];
+  Player get opponent => players[(currentPlayerIndex + 1) % players.length];
 
   // ----------------------------------------------------------------------------
   // Game lifecycle
   // ----------------------------------------------------------------------------
 
+  /// (Re)starts a fresh game with data from GameDataManager
   void startGame() {
-    // Use your game data source; it already has proper CardDefinitions
     _initializeGame(GameDataManager.cards);
     notifyListeners();
   }
@@ -48,27 +68,20 @@ class CardGameStateManager extends ChangeNotifier {
       Player(id: 'player2'),
     ];
 
-    // Init player state
+    // Initialize player state
     for (final p in players) {
-      // Assuming allCards contains the full set of cards available in the game.
-      // You'll need logic here to build each player's starting deck.
-      // For now, we'll just give each player a copy of all cards and shuffle.
-      // TODO: Implement actual deck loading based on player's chosen deck.
-      p.deck = List.from(allCards)..shuffle(Random());
-      p.life = 20;
-      // p.score = 20; // if other parts still read `score` as HP - Removed score as life is used now.
-      p.resources = 20;
+      // TODO: Replace with real deckbuilding/import once you have it.
+      p.deck = List<CardDefinition>.from(allCards)..shuffle(Random());
+      p.life = GameRules.startingLife;
+      p.resources = GameRules.startingResources;
       p.hand.clear();
-      p.playArea.clear();
-      p.graveyard.clear();
+      p.playArea.clear(); // List<CreatureInPlay>
+      p.graveyard.clear(); // List<CardDefinition>
     }
 
+    // Draw opening hands
     for (final p in players) {
-      // Deal 5 from player's own deck
-      for (var i = 0; i < 5; i++) {
-        if (p.deck.isEmpty) break;
- p.hand.add(p.deck.removeAt(0));
-      }
+      _drawOpeningHand(p, GameRules.startingHandSize);
     }
 
     currentPlayerIndex = 0;
@@ -76,8 +89,15 @@ class CardGameStateManager extends ChangeNotifier {
     _startOfPhase();
   }
 
+  void _drawOpeningHand(Player player, int count) {
+    for (var i = 0; i < count; i++) {
+      if (player.deck.isEmpty) break;
+      player.hand.add(player.deck.removeAt(0));
+    }
+  }
+
   // ----------------------------------------------------------------------------
-  // Public API used by the UI
+  // Turn & Phase flow
   // ----------------------------------------------------------------------------
 
   void nextPhase() {
@@ -103,52 +123,95 @@ class CardGameStateManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _startOfPhase() {
+    switch (currentPhase) {
+      case TurnPhase.start:
+        // Untap & remove summoning sickness for current player
+        for (final c in currentPlayer.playArea) {
+          c.isTapped = false;
+          c.hasSummoningSickness = false;
+        }
+
+        // Draw and gain resource
+        drawCard(currentPlayer);
+
+        currentPlayer.resources += GameRules.resourceGainPerTurnStart;
+        developer.log(
+          '${currentPlayer.id} +${GameRules.resourceGainPerTurnStart} resource => ${currentPlayer.resources}',
+        );
+        break;
+
+      case TurnPhase.main1:
+      case TurnPhase.combat:
+      case TurnPhase.main2:
+      case TurnPhase.end:
+        // No automatic effects by default
+        break;
+    }
+  }
+
+  void _endTurnAndPass() {
+    _declaredAttackers.clear(); // Clean up combat selections
+    currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+  }
+
+  // ----------------------------------------------------------------------------
+  // Public API used by the UI
+  // ----------------------------------------------------------------------------
+
   void toggleCreatureTapped(CreatureInPlay creature) {
     creature.isTapped = !creature.isTapped;
     notifyListeners();
   }
 
+  /// Declare attackers (must be your creatures, not summoning sick if attacking)
   void declareAttackers(List<CreatureInPlay> attackers) {
     _declaredAttackers
       ..clear()
-      ..addAll(attackers);
+      ..addAll(
+        attackers.where((a) =>
+            currentPlayer.playArea.contains(a) &&
+            (!GameRules.summoningSicknessAffectsAttack || !a.hasSummoningSickness)),
+      );
 
-    // Tap attackers on declare
-    for (final a in _declaredAttackers) {
-      a.isTapped = true;
+    if (GameRules.tapAttackersOnDeclare) {
+      for (final a in _declaredAttackers) {
+        a.isTapped = true;
+      }
     }
+
     notifyListeners();
   }
 
+  /// Draw a card; reshuffle from the player's own graveyard if needed
   void drawCard(Player player) {
-    // Shared deck flow
     if (player.deck.isEmpty) {
- if (player.graveyard.isNotEmpty) {
-        deck = List.from(discardPile)..shuffle(Random());
-        discardPile.clear();
-        developer.log('Shuffled discard pile into deck.');
+      if (player.graveyard.isNotEmpty) {
+        player.deck = List<CardDefinition>.from(player.graveyard)..shuffle(Random());
+        player.graveyard.clear();
+        developer.log("Shuffled ${player.id}'s graveyard back into the deck.");
       } else {
-        developer.log('No cards left to draw.');
+        developer.log('No cards left to draw for ${player.id}.');
         return;
       }
     }
 
-    const handLimit = 7;
-    if (player.hand.length >= handLimit) {
-      developer.log('${player.id} hand full.');
+    if (player.hand.length >= GameRules.handLimit) {
+      developer.log('${player.id} hand full (limit ${GameRules.handLimit}).');
       return;
     }
 
- player.hand.add(player.deck.removeAt(0));
+    player.hand.add(player.deck.removeAt(0));
     notifyListeners();
   }
 
+  /// Play a card from hand; creatures enter play, spells resolve then go to graveyard
   void playCard(Player player, CardDefinition card) {
     if (!player.hand.contains(card)) {
       developer.log('Card not in ${player.id} hand: ${card.name}');
       return;
     }
-    if (player.resources < card.cost) {
+    if (player.resources < (card.cost)) {
       developer.log('Not enough resources for ${card.name}.');
       return;
     }
@@ -156,7 +219,8 @@ class CardGameStateManager extends ChangeNotifier {
     player.hand.remove(card);
     player.resources -= card.cost;
 
-    if (card.typeId.toLowerCase() == 'creature') {
+    final type = card.typeId.toLowerCase();
+    if (type == 'creature') {
       player.playArea.add(
         CreatureInPlay(
           cardDefinition: card,
@@ -165,17 +229,15 @@ class CardGameStateManager extends ChangeNotifier {
         ),
       );
     } else {
-      // Spell effect resolution (basic examples)
       _resolveCardAbilities(player, card);
-      // Then send the spell to graveyard
+      // send spells to graveyard after resolution
       player.graveyard.add(card);
     }
 
     notifyListeners();
   }
 
-  /// Simple simultaneous combat:
-  /// attackers pair by lane index; if no blocker, damage to player.
+  /// Simple lane-based simultaneous combat
   void resolveCombat() {
     if (_declaredAttackers.isEmpty) {
       developer.log('No attackers declared.');
@@ -183,10 +245,10 @@ class CardGameStateManager extends ChangeNotifier {
     }
 
     final attacker = currentPlayer;
-    final defender = players[(currentPlayerIndex + 1) % players.length];
+    final defender = opponent;
 
-    final toGraveAtk = <CardDefinition>[];
-    final toGraveDef = <CardDefinition>[];
+    final defeatedAtk = <CreatureInPlay>[];
+    final defeatedDef = <CreatureInPlay>[];
 
     final laneCount = _max(attacker.playArea.length, defender.playArea.length);
 
@@ -194,10 +256,8 @@ class CardGameStateManager extends ChangeNotifier {
       final atk = i < attacker.playArea.length ? attacker.playArea[i] : null;
       final blk = i < defender.playArea.length ? defender.playArea[i] : null;
 
-      // must be one of the declared attackers and not summoning sick
-      if (atk == null ||
-          !_declaredAttackers.contains(atk) ||
-          atk.hasSummoningSickness) {
+      // attacker must be declared & legal
+      if (atk == null || !_declaredAttackers.contains(atk) || atk.hasSummoningSickness) {
         continue;
       }
 
@@ -206,129 +266,108 @@ class CardGameStateManager extends ChangeNotifier {
         continue;
       }
 
-      // trade damage
-      blk.currentToughness -= atk.cardDefinition.attack; // Corrected to use attack from CardDefinition
-      atk.currentToughness -= blk.cardDefinition.attack; // Corrected to use attack from CardDefinition
+      // Simultaneous damage using each creature's base/current attack
+      final atkPower = atk.cardDefinition.attack ?? 0;
+      final blkPower = blk.cardDefinition.attack ?? 0;
 
- if (blk.currentToughness <= 0) toGraveDef.add(blk.cardDefinition);
- if (atk.currentToughness <= 0) toGraveAtk.add(atk.cardDefinition);
+      blk.currentToughness -= atkPower;
+      atk.currentToughness -= blkPower;
+
+      if (blk.currentToughness <= 0) defeatedDef.add(blk);
+      if (atk.currentToughness <= 0) defeatedAtk.add(atk);
     }
 
-    attacker.playArea.removeWhere((c) => toGraveAtk.contains(c.cardDefinition));
-    defender.playArea.removeWhere((c) => toGraveDef.contains(c.cardDefinition));
-    discardPile.addAll(toGraveAtk);
-    discardPile.addAll(toGraveDef);
+    // Remove defeated creatures from play
+    attacker.playArea.removeWhere((c) => defeatedAtk.contains(c));
+    defender.playArea.removeWhere((c) => defeatedDef.contains(c));
+
+    // Their card backs go to global discard (or swap to per-player graveyard if desired)
+    discardPile.addAll(defeatedAtk.map((c) => c.cardDefinition));
+    discardPile.addAll(defeatedDef.map((c) => c.cardDefinition));
 
     _declaredAttackers.clear();
 
     final win = _checkWin();
-    if (win != null) endGame(win);
+    if (win != null) {
+      endGame(win);
+    }
 
     notifyListeners();
   }
 
   // ----------------------------------------------------------------------------
-  // Internals
+  // Internals: abilities, win checks, helpers
   // ----------------------------------------------------------------------------
-
-  void _startOfPhase() {
-    switch (currentPhase) {
-      case TurnPhase.start:
-        // Untap & remove summoning sickness
-        for (final c in currentPlayer.playArea) {
-          c.isTapped = false;
-          c.hasSummoningSickness = false;
-        }
-        drawCard(currentPlayer);
-        currentPlayer.resources += 1; // Gain 1 resource at start of turn
-        developer.log('${currentPlayer.id} gained 1 resource. New resources: ${currentPlayer.resources}');
-        break;
-      case TurnPhase.main1:
-      case TurnPhase.combat:
-      case TurnPhase.main2:
-      case TurnPhase.end:
-        break;
-    }
-  }
-
-  void _endTurnAndPass() {
-    currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
-  }
 
   void _resolveCardAbilities(Player player, CardDefinition card) {
     for (final ability in card.abilities) {
       switch (ability) {
- case CardAbilityType.attackBoost:
-          // +1/+0 to the first creature you control
- try {
- final target = player.playArea.firstWhere((_) => true); // Find the first creature
-            target.currentAttack += 1;
- } catch (e) { // Catch the StateError if no creature is found
-            // No creature found, do nothing or log
-            developer.log('No creature to target with attackBoost');
-          }
- break;
+        case CardAbilityType.attackBoost:
+          _buffFirstFriendly(player, attackDelta: 1, defenseDelta: 0);
+          break;
 
- case CardAbilityType.defenseBoost:
-          final target2 = player.playArea.firstWhere(
-            (_) => true, // Find the first creature
- );
- try {
- target2.currentToughness += 1;
- } catch (e) { // Catch the StateError if no creature is found
-            // No creature found, do nothing or log
-            developer.log('No creature to target with defenseBoost');
-          }
- break;
+        case CardAbilityType.defenseBoost:
+          _buffFirstFriendly(player, attackDelta: 0, defenseDelta: 1);
+          break;
 
- case CardAbilityType.drawCard:
+        case CardAbilityType.drawCard:
           drawCard(player);
           break;
 
- case CardAbilityType.discardOpponentCard:
-          final opp = players.firstWhere((p) => p.id != player.id);
+        case CardAbilityType.discardOpponentCard:
+          final opp = opponentOf(player);
           if (opp.hand.isNotEmpty) {
             final i = Random().nextInt(opp.hand.length);
-            discardPile.add(opp.hand.removeAt(i));
+            final removed = opp.hand.removeAt(i);
+            discardPile.add(removed);
           }
           break;
- case CardAbilityType.removeTargetCreatureFromPlay:
-          final opp2 = players.firstWhere((p) => p.id != player.id);
+
+        case CardAbilityType.removeTargetCreatureFromPlay:
+          final opp2 = opponentOf(player);
           if (opp2.playArea.isNotEmpty) {
             final removed = opp2.playArea.removeAt(0);
             discardPile.add(removed.cardDefinition);
           }
           break;
- case CardAbilityType.gainResources:
+
+        case CardAbilityType.gainResources:
           player.resources += 10;
           break;
- case CardAbilityType.heal:
+
+        case CardAbilityType.heal:
           player.life += 5;
-          // player.score += 5; // keep both in sync if score is used elsewhere - Removed score as life is used now.
           break;
- case CardAbilityType.dealDamageX:
- // TODO: Implement dealDamageX logic
- break;
+
+        case CardAbilityType.dealDamageX:
+          // Example placeholder: deal 3 to opponent hero (replace X with card.value or similar)
+          opponentOf(player).life -= 3;
+          break;
       }
     }
   }
 
-  String? _checkWin() {
-    final playersAtZeroOrLessLife = players.where((p) => p.life <= 0).toList();
-
-    if (playersAtZeroOrLessLife.length > 1) {
-      // More than one player at 0 or less life - it's a draw
-      return 'draw';
-    } else if (playersAtZeroOrLessLife.length == 1) {
-      // Exactly one player is at 0 or less life - the other player wins
-      final losingPlayerId = playersAtZeroOrLessLife.first.id;
-      return players.firstWhere((p) => p.id != losingPlayerId).id;
+  void _buffFirstFriendly(Player player, {int attackDelta = 0, int defenseDelta = 0}) {
+    if (player.playArea.isEmpty) {
+      developer.log('No friendly creature to buff.');
+      return;
     }
-    // No player is at 0 or less life
-    for (final p in players) { // Corrected loop variable
-      if (p.life <= 0) {
-        return players.firstWhere((o) => o.id != p.id).id;
-      }
+    final target = player.playArea.first;
+    if (attackDelta != 0) target.currentAttack += attackDelta;
+    if (defenseDelta != 0) target.currentToughness += defenseDelta;
+  }
+
+  Player opponentOf(Player p) =>
+      players.firstWhere((x) => !identical(x, p), orElse: () => opponent);
+
+  String? _checkWin() {
+    final losers = players.where((p) => p.life <= 0).toList();
+
+    if (losers.length > 1) {
+      return 'draw';
+    } else if (losers.length == 1) {
+      final losingId = losers.first.id;
+      return players.firstWhere((p) => p.id != losingId).id;
     }
     return null;
   }
@@ -340,4 +379,26 @@ class CardGameStateManager extends ChangeNotifier {
   }
 
   int _max(int a, int b) => a > b ? a : b;
+
+  // ----------------------------------------------------------------------------
+  // Convenience helpers for UI/testing
+  // ----------------------------------------------------------------------------
+
+  /// Converts a card in hand to a creature directly (used by debug buttons / tests)
+  void playFirstCreatureInHand(Player player) {
+    final idx = player.hand.indexWhere((c) => c.typeId.toLowerCase() == 'creature');
+    if (idx == -1) {
+      developer.log('No creature in hand for ${player.id}.');
+      return;
+    }
+    final card = player.hand[idx];
+    playCard(player, card);
+  }
+
+  /// Declares all eligible friendly creatures as attackers (quick test helper)
+  void declareAllAttackers() {
+    declareAttackers(
+      currentPlayer.playArea.where((c) => !c.hasSummoningSickness).toList(),
+    );
+  }
 }
